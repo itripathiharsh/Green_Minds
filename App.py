@@ -21,12 +21,10 @@ from firebase_admin import credentials, firestore
 from google.oauth2 import service_account
 # Game helper
 from streamlit_image_select import image_select
-
 # --- Suppress TensorFlow Warnings ---
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="tensorflow")
-
 # --- Page Config ---
 st.set_page_config(page_title="Green Minds 🌱", page_icon="🌱", layout="wide")
 
@@ -53,7 +51,6 @@ def init_connection():
     except Exception as e:
         st.error(f"Failed to connect to Firestore: {e}")
         st.stop()
-
 db = init_connection()
 
 # --- GEETA GYAAN API & LOGIC ---
@@ -61,10 +58,8 @@ VERSE_COUNTS = [47, 72, 43, 42, 29, 47, 30, 28, 34, 42, 55, 20, 35, 27, 20, 24, 
 TOTAL_VERSES = sum(VERSE_COUNTS)
 
 def get_chapter_and_verse_from_day(day_index):
-    """Maps a day number (1-700) to a specific chapter and verse."""
     shlok_number = (day_index % TOTAL_VERSES)
     if shlok_number == 0: shlok_number = TOTAL_VERSES
-
     chapter = 1
     verse_count_sum = 0
     for count in VERSE_COUNTS:
@@ -73,12 +68,11 @@ def get_chapter_and_verse_from_day(day_index):
             verse = shlok_number - (verse_count_sum - count)
             return chapter, verse
         chapter += 1
-    return 18, 78 # Fallback to the last verse
+    return 18, 78
 
-@st.cache_data(ttl=86400) # Cache the result for a full day (86400 seconds)
+@st.cache_data(ttl=86400)
 def fetch_daily_shlok_from_rapidapi(chapter, verse):
-    """Fetches a specific shlok from the Bhagavad Gita RapidAPI."""
-    rapid_api_key = st.secrets.get("api_keys", {}).get("rapidapi") or st.secrets.get("rapidapi")
+    rapid_api_key = st.secrets.get("rapidapi") or st.secrets.get("api_keys", {}).get("rapidapi")
     if not rapid_api_key:
         st.error("RapidAPI key not found in secrets.")
         return None
@@ -107,7 +101,6 @@ WELLNESS_GAMES = {
 }
 
 def save_daily_score(username, game_name, score):
-    """Saves a game score to Firestore for the current day."""
     try:
         today_str = datetime.now().strftime("%Y-%m-%d")
         doc_ref = db.collection("users").document(username).collection("wellness_scores").document(today_str)
@@ -116,17 +109,14 @@ def save_daily_score(username, game_name, score):
         st.warning(f"Could not save score: {e}")
 
 def display_daily_scores(username):
-    """Fetches and displays today's scores from Firestore in a clean table."""
     st.subheader("🏆 Your Daily Scorecard")
     try:
         today_str = datetime.now().strftime("%Y-%m-%d")
         doc_ref = db.collection("users").document(username).collection("wellness_scores").document(today_str)
         scores_doc = doc_ref.get()
-
         if not scores_doc.exists or not scores_doc.to_dict():
             st.info("You haven't completed any activities today. Play a game to see your score!")
             return
-
         scores = scores_doc.to_dict()
         score_data = []
         for category, games in WELLNESS_GAMES.items():
@@ -139,11 +129,9 @@ def display_daily_scores(username):
                         "Activity": game,
                         "Score / Status": display_score
                     })
-        
         if not score_data:
             st.info("You haven't completed any activities today. Play a game to see your score!")
             return
-
         with st.container(border=True):
             df = pd.DataFrame(score_data)
             st.dataframe(
@@ -156,7 +144,6 @@ def display_daily_scores(username):
                     "Score / Status": st.column_config.TextColumn("Score / Status", width="small"),
                 }
             )
-
     except Exception as e:
         st.error(f"Could not load scores: {e}")
 
@@ -226,55 +213,44 @@ def text_to_audio(text, lang='en'):
         st.error(f"Could not generate audio. Error: {e}")
         return None
 
-# --- UNIFIED GENERATIVE AI FUNCTIONS ---
+# --- GENERATIVE AI FUNCTIONS (Gemini ONLY) ---
 def get_gemini_keys():
     keys = []
     for i in range(1, 11):
         key_name = f"GEMINI_API_KEY_{i}"
         key = st.secrets.get(key_name) or st.secrets.get("api_keys", {}).get(key_name)
-        if key: keys.append(key)
+        if key:
+            keys.append(key)
     return keys
 
-def get_groq_keys():
-    keys = []
-    for i in range(1, 11):
-        key_name = f"GROQ_API_KEY_{i}"
-        key = st.secrets.get(key_name) or st.secrets.get("api_keys", {}).get(key_name)
-        if key: keys.append(key)
-    return keys
-
-def generate_ai_response(prompt, service_preference=['groq', 'gemini']):
-    """Tries a list of services in order to get an AI response."""
-    for service in service_preference:
-        if service == 'groq':
-            keys = get_groq_keys()
-            if not keys: continue
-            for key in keys:
-                try:
-                    api_url = "https://api.groq.com/openai/v1/chat/completions"
-                    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-                    payload = {"messages": [{"role": "user", "content": prompt}], "model": "llama3-8b-8192"}
-                    response = requests.post(api_url, json=payload, headers=headers, timeout=25)
-                    response.raise_for_status()
-                    return response.json()["choices"][0]["message"]["content"]
-                except Exception:
-                    continue
-        
-        elif service == 'gemini':
-            keys = get_gemini_keys()
-            if not keys: continue
-            for key in keys:
-                try:
-                    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={key}"
-                    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-                    response = requests.post(api_url, json=payload, headers={'Content-Type': 'application/json'}, timeout=25)
-                    response.raise_for_status()
-                    return response.json()["candidates"][0]["content"]["parts"][0]["text"]
-                except Exception:
-                    continue
+def generate_ai_response(prompt):
+    """Uses ONLY Gemini to generate a response."""
+    keys = get_gemini_keys()
+    if not keys:
+        st.warning("No Gemini API key found. Showing a supportive message instead.")
+        return (
+            "Take a slow breath in for 4 seconds, hold for 4, exhale for 6. "
+            "You're doing your best, and that’s enough for today. 💚"
+        )
     
-    st.error("All AI services failed. Please check your API keys and try again later.")
-    return None
+    for key in keys:
+        try:
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
+            payload = {"contents": [{"parts": [{"text": prompt}]}]}
+            response = requests.post(api_url, json=payload, headers={'Content-Type': 'application/json'}, timeout=25)
+            response.raise_for_status()
+            data = response.json()
+            if "candidates" in data and len(data["candidates"]) > 0:
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception:
+            continue
+    
+    # Fallback if all keys fail
+    st.warning("AI services are temporarily busy. Here's a gentle reminder:")
+    return (
+        "Breathe in slowly for 4 seconds, hold for 4, exhale for 6. "
+        "You're doing your best, and that matters. Try again in a minute."
+    )
 
 @st.cache_data(ttl=86400)
 def translate_text(text_list, target_language):
@@ -302,26 +278,19 @@ def get_activities(mood, lang='en'):
 def load_models():
     goemotions_model_name = "monologg/bert-base-cased-goemotions-original"
     sentiment_model_name = "finiteautomata/bertweet-base-sentiment-analysis"
-    
     hf_token = st.secrets.get("HUGGING_FACE_API_KEY") or st.secrets.get("api_keys", {}).get("hugging_face_api_key")
     if not hf_token: 
         st.error("Hugging Face API Key not found in secrets.")
         st.stop()
-    
-    # CORRECTED: Explicitly pass the token to all from_pretrained calls
     goemotions_tokenizer = AutoTokenizer.from_pretrained(goemotions_model_name, token=hf_token)
     goemotions_model = AutoModelForSequenceClassification.from_pretrained(goemotions_model_name, token=hf_token)
-    
     sentiment_tokenizer = AutoTokenizer.from_pretrained(sentiment_model_name, token=hf_token)
     sentiment_model = AutoModelForSequenceClassification.from_pretrained(sentiment_model_name, token=hf_token)
-    
     emotions_url = "https://raw.githubusercontent.com/google-research/google-research/master/goemotions/data/emotions.txt"
     emotions = requests.get(emotions_url).text.strip().split('\n')
-    
     return goemotions_tokenizer, goemotions_model, sentiment_tokenizer, sentiment_model, emotions
 
 goemotions_tokenizer, goemotions_model, sentiment_tokenizer, sentiment_model, emotions = load_models()
-
 
 def detect_emotion(text):
     inputs = goemotions_tokenizer(text, return_tensors="pt", truncation=True, padding=True)
@@ -343,6 +312,7 @@ def detect_mental_state(text):
 
 # --- Question Rotation Logic ---
 QUESTION_POOL = ["How did you feel when you woke up today?", "How was your day at work or school?", "Did you talk to friends or family today? How did that feel?", "What was the most stressful part of your day?", "How are you feeling right now?", "Did anything make you laugh today?", "What was something you were proud of today?", "How would you describe your energy level today?", "Did you feel connected to others today?", "Was there a moment of peace or joy today?", "Did you feel lonely at any point?", "What frustrated you the most today?", "Did you feel anxious or nervous? What triggered it?", "Was today better or worse than yesterday? Why?", "Did you do something just for yourself today?", "What's one thing you're looking forward to tomorrow?", "Describe a small victory you had today.", "What's something that has been on your mind lately?"]
+
 @st.cache_data(ttl=3600)
 def get_daily_questions(user_id):
     today = datetime.now().date()
@@ -373,6 +343,7 @@ if 'responses' not in st.session_state: st.session_state.responses = {}
 if 'logged_in' not in st.session_state: st.session_state.logged_in = st.session_state.get("permanent_login", False)
 if 'username' not in st.session_state: st.session_state.username = None
 if 'share_anonymously' not in st.session_state: st.session_state.share_anonymously = False
+
 def set_page(page_name): st.session_state.page = page_name
 
 # --- MAIN APP ---
@@ -408,11 +379,9 @@ else:
     st.sidebar.button("Today's Results", on_click=set_page, args=('Results',), use_container_width=True)
     st.sidebar.button("Trends", on_click=set_page, args=('Trends',), use_container_width=True)
     st.sidebar.divider()
-
     LANGUAGE_CODES = {"English": "en", "Hindi": "hi", "Spanish": "es", "French": "fr", "German": "de", "Japanese": "ja"}
     LANGUAGE_API_MAP = {"English": "english", "Hindi": "hindi", "Spanish": "spanish"}
     st.session_state.language = st.sidebar.selectbox("Select Language", list(LANGUAGE_CODES.keys()))
-
     if st.sidebar.button("Logout", use_container_width=True):
         for key in ["logged_in", "username", "permanent_login", "responses", "analysis_results"]:
             st.session_state.pop(key, None)
@@ -448,13 +417,10 @@ else:
                         st.rerun()
                     except Exception as e:
                         st.error(f"Could not save data to Firestore. Error: {e}")
-
     elif st.session_state.page == 'People':
         st.title("👥 My People")
         st.markdown("A place to remember the important people in your life, including yourself. This can be a helpful memory aid.")
-        
         people_ref = db.collection("users").document(st.session_state.username).collection("people")
-        
         with st.expander("➕ Add a New Person", expanded=False):
             with st.form("person_form", clear_on_submit=True):
                 name = st.text_input("Name*")
@@ -464,7 +430,6 @@ else:
                 memories = st.text_area("Key Memories & Stories")
                 details = st.text_area("Important Details (e.g., Loves gardening, Birthday: March 15)")
                 submitted = st.form_submit_button("Save Person")
-
                 if submitted and name:
                     person_data = {"name": name, "relation": relation, "memories": memories, "details": details, "photo_url": photo_url, "photo_base64": None}
                     if uploaded_photo is not None:
@@ -475,13 +440,11 @@ else:
                     st.success(f"Saved details for {name}!")
                     st.rerun()
         st.divider()
-
         try:
             people_docs = people_ref.stream()
             people_list = {doc.id: doc.to_dict() for doc in people_docs}
             if not people_list:
                 st.info("You haven't added anyone yet. Click the expander above to add your first person!")
-            
             if "view_person_id" in st.session_state and st.session_state.view_person_id:
                 person_to_view = people_list.get(st.session_state.view_person_id)
                 if person_to_view:
@@ -500,7 +463,6 @@ else:
                             st.session_state.view_person_id = None
                             st.rerun()
                     view_person_details()
-
             cols = st.columns(3)
             for i, (doc_id, person) in enumerate(people_list.items()):
                 with cols[i % 3]:
@@ -511,17 +473,14 @@ else:
                             st.image(person["photo_url"], caption=person["name"])
                         st.subheader(person["name"])
                         st.write(f"**Relation:** {person['relation']}")
-                        
                         if st.button("View Full Details", key=f"view_{doc_id}", use_container_width=True):
                             st.session_state.view_person_id = doc_id
                             st.rerun()
-                        
                         if st.button("Delete", key=f"del_{doc_id}", use_container_width=True):
                             people_ref.document(doc_id).delete()
                             st.rerun()
         except Exception as e:
             st.error(f"Could not load people from Firestore. Error: {e}")
-
     elif st.session_state.page == 'Geeta':
         st.title("📖 Geeta Gyaan (गीता ज्ञान)")
         st.markdown("<p style='text-align: center; font-style: italic;'>The Gita holds timeless answers to life's profound questions.</p>", unsafe_allow_html=True)
@@ -569,7 +528,6 @@ else:
                 st.write(final_meaning)
         else:
              st.error("Could not load the Shlok of the Day. Please try again tomorrow.")
-
     elif st.session_state.page == 'Journal':
         st.title("✍️ My Daily Journal")
         journal_streak = calculate_streak(st.session_state.username, "journal_entries")
@@ -605,7 +563,6 @@ else:
                     with st.expander(f"**{entry['timestamp'].strftime('%Y-%m-%d')}**"):
                         st.write(entry.get("text"))
         except Exception as e: st.write("Could not load past entries.")
-
     elif st.session_state.page == 'Community':
         st.title("🤝 Community Reflections")
         st.markdown("Read anonymous reflections from other users. React to show your support.")
@@ -628,7 +585,6 @@ else:
                             st.rerun()
                     st.divider()
         except Exception as e: st.error(f"Could not load community entries. Error: {e}")
-
     elif st.session_state.page == 'Exercises':
         st.title("🧘 Wellness Exercises")
         selected_category = st.selectbox("Choose a category:", list(WELLNESS_GAMES.keys()))
@@ -697,7 +653,6 @@ else:
                 if st.button("New Riddle"):
                     st.session_state.pop('current_riddle', None)
                     st.rerun()
-
                 if 'current_riddle' not in st.session_state:
                     with st.spinner("Generating a new riddle..."):
                         prompt = "Generate a single, short, clever riddle with a one or two-word answer. Your entire response must follow this exact format, with no extra text or introductions:\nRiddle: [The riddle text]\nAnswer: [The answer text]"
@@ -710,10 +665,8 @@ else:
                         else:
                             st.error("Could not generate a riddle. Please try again.")
                             st.stop()
-                
                 riddle = st.session_state.current_riddle
                 st.markdown(f"**{riddle['q']}**")
-
                 if not riddle.get('h'):
                     if st.button("Show Hint"):
                         with st.spinner("Generating a hint..."):
@@ -726,7 +679,6 @@ else:
                             st.rerun()
                 else:
                     st.info(f"Hint: {riddle['h']}")
-
                 with st.form(key=f"riddle_form_{riddle['q']}"):
                     user_answer = st.text_input("Your Answer:")
                     submitted = st.form_submit_button("Check Answer")
@@ -737,14 +689,12 @@ else:
                             st.rerun()
                         else:
                             st.error(f"Not quite! The answer was: **{riddle['a']}**")
-
             elif selected_game == "Word Scramble":
                 st.subheader("📝 Word Scramble")
                 st.markdown("Unscramble a new AI-generated word each time.")
                 if st.button("New Word"):
                     st.session_state.pop('scrambled_word', None)
                     st.rerun()
-
                 if 'scrambled_word' not in st.session_state:
                     with st.spinner("Generating a new word..."):
                         prompt = "Give me a single, common, positive English word between 4 and 7 letters long. Only provide the word itself, with no extra text."
@@ -757,7 +707,6 @@ else:
                         else:
                             st.error("Could not generate a word. Please try again.")
                             st.stop()
-                
                 if not st.session_state.get('scramble_solved', False):
                     st.markdown(f"Unscramble this word: ## `{st.session_state.scrambled_word}`")
                     with st.form(key=f"scramble_form_{st.session_state.scrambled_word}"):
@@ -770,7 +719,6 @@ else:
                             else: st.error("Try again! ❌")
                 else:
                     st.success("Correct! Try another word.")
-
             elif selected_game == "Simon Says":
                 st.subheader("🎨 Simon Says")
                 st.markdown("Watch the sequence, then repeat it. Higher level is better!")
@@ -857,7 +805,6 @@ else:
                     save_daily_score(st.session_state.username, selected_game, "Completed")
         st.divider()
         display_daily_scores(st.session_state.username)
-
     elif st.session_state.page == 'Results':
         st.title("✨ Today's Analysis")
         if st.session_state.analysis_results:
@@ -887,7 +834,6 @@ else:
                 if activities_markdown: st.markdown(activities_markdown)
                 else: st.error("Could not retrieve activities at this time.")
         else: st.info("Please complete the questionnaire on the 'Home' page to see your results.")
-
     elif st.session_state.page == 'Trends':
         st.title("📈 Historical Trends")
         username = st.session_state.username
@@ -909,7 +855,6 @@ else:
                         fig_pie = go.Figure(data=[go.Pie(labels=emotion_counts.index, values=emotion_counts.values, hole=.3)])
                         fig_pie.update_layout(title_text='Dominant Emotions (Last 30 Days)')
                         st.plotly_chart(fig_pie, use_container_width=True)
-                        
                         df_30_days['emotion_category'] = df_30_days['emotion_1'].map(EMOTION_TO_CATEGORY)
                         category_counts = df_30_days.groupby(['timestamp', 'emotion_category']).size().unstack(fill_value=0)
                         fig_area = go.Figure()
@@ -935,13 +880,11 @@ else:
                     df_scores.index = pd.to_datetime(df_scores.index)
                     thirty_days_ago_ts = pd.Timestamp.now() - pd.Timedelta(days=30)
                     df_scores_30 = df_scores[df_scores.index >= thirty_days_ago_ts].copy()
-                    
                     played_games = df_scores_30.count().sort_values(ascending=False)
                     if not played_games.empty:
                         fig_pie_games = go.Figure(data=[go.Pie(labels=played_games.index, values=played_games.values, hole=.3)])
                         fig_pie_games.update_layout(title_text='Activity Engagement (Last 30 Days)')
                         st.plotly_chart(fig_pie_games, use_container_width=True)
-
                     numerical_games = ['Number Tap Challenge', 'Memory Match', 'Simon Says']
                     available_numerical_games = [game for game in numerical_games if game in df_scores.columns]
                     if available_numerical_games:
@@ -949,10 +892,8 @@ else:
                         help_text = "Lower is better" if selected_game_trend in ['Number Tap Challenge', 'Memory Match'] else "Higher is better"
                         st.line_chart(df_scores[selected_game_trend].dropna(), use_container_width=True)
                         st.caption(f"Trend for {selected_game_trend}. *Note: {help_text}.*")
-
                     completion_games_all = [game for sublist in WELLNESS_GAMES.values() for game in sublist if game not in numerical_games]
                     completion_games_in_df = [game for game in completion_games_all if game in df_scores_30.columns]
-                    
                     if completion_games_in_df:
                         df_scores_30[completion_games_in_df] = df_scores_30[completion_games_in_df].apply(lambda x: x.notna().astype(int))
                         completion_counts = df_scores_30[completion_games_in_df].sum().sort_values(ascending=False)
